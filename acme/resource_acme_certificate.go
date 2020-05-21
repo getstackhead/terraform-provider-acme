@@ -3,6 +3,7 @@ package acme
 import (
 	"crypto/x509"
 	"fmt"
+	"github.com/go-acme/lego/v3/lego"
 	"log"
 	"time"
 
@@ -75,6 +76,11 @@ func resourceACMECertificateV4() *schema.Resource {
 				Required: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
+						"method": {
+							Type:     schema.TypeString,
+							Optional: true,
+							Default:  "dns",
+						},
 						"provider": {
 							Type:     schema.TypeString,
 							Required: true,
@@ -255,30 +261,7 @@ func resourceACMECertificateCreate(d *schema.ResourceData, meta interface{}) err
 		return err
 	}
 
-	provider, err := NewDNSProviderWrapper()
-	if err != nil {
-		return err
-	}
-
-	for _, v := range d.Get("dns_challenge").([]interface{}) {
-		if p, err := setDNSChallenge(client, v.(map[string]interface{})); err == nil {
-			provider.providers = append(provider.providers, p)
-		} else {
-			return err
-		}
-	}
-
-	var opts []dns01.ChallengeOption
-	if nameservers := d.Get("recursive_nameservers").([]interface{}); len(nameservers) > 0 {
-		var s []string
-		for _, ns := range nameservers {
-			s = append(s, ns.(string))
-		}
-
-		opts = append(opts, dns01.AddRecursiveNameservers(s))
-	}
-
-	if err := client.Challenge.SetDNS01Provider(provider, opts...); err != nil {
+	if err := setupChallenge(client, d); err != nil {
 		return err
 	}
 
@@ -429,30 +412,7 @@ func resourceACMECertificateUpdate(d *schema.ResourceData, meta interface{}) err
 
 	cert := expandCertificateResource(d)
 
-	provider, err := NewDNSProviderWrapper()
-	if err != nil {
-		return err
-	}
-
-	for _, v := range d.Get("dns_challenge").([]interface{}) {
-		if p, err := setDNSChallenge(client, v.(map[string]interface{})); err == nil {
-			provider.providers = append(provider.providers, p)
-		} else {
-			return err
-		}
-	}
-
-	var opts []dns01.ChallengeOption
-	if nameservers := d.Get("recursive_nameservers").([]interface{}); len(nameservers) > 0 {
-		var s []string
-		for _, ns := range nameservers {
-			s = append(s, ns.(string))
-		}
-
-		opts = append(opts, dns01.AddRecursiveNameservers(s))
-	}
-
-	if err := client.Challenge.SetDNS01Provider(provider, opts...); err != nil {
+	if err := setupChallenge(client, d); err != nil {
 		return err
 	}
 
@@ -514,6 +474,58 @@ func resourceACMECertificateHasExpired(d certificateResourceExpander) (bool, err
 	}
 
 	return false, nil
+}
+
+func setupChallenge(client *lego.Client, d *schema.ResourceData) error {
+	provider, err := NewDNSProviderWrapper()
+	if err != nil {
+		return err
+	}
+
+	// Check for provider configured with http method
+	useHttp01 := false
+	for _, v := range d.Get("dns_challenge").([]interface{}) {
+		config := v.(map[string]interface{})
+		if config["method"] == "http" {
+			useHttp01 = true
+			break
+		}
+	}
+
+	for _, v := range d.Get("dns_challenge").([]interface{}) {
+		config := v.(map[string]interface{})
+		if (!useHttp01 && config["method"] != "dns") || (useHttp01 && config["method"] != "http") {
+			continue
+		}
+		if p, err := setDNSChallenge(client, config); err == nil {
+			provider.providers = append(provider.providers, p)
+		} else {
+			return err
+		}
+	}
+
+	if !useHttp01 {
+		// DNS Validation
+		var opts []dns01.ChallengeOption
+		if nameservers := d.Get("recursive_nameservers").([]interface{}); len(nameservers) > 0 {
+			var s []string
+			for _, ns := range nameservers {
+				s = append(s, ns.(string))
+			}
+
+			opts = append(opts, dns01.AddRecursiveNameservers(s))
+		}
+
+		if err := client.Challenge.SetDNS01Provider(provider, opts...); err != nil {
+			return err
+		}
+	} else {
+		// HTTP01 Validation
+		if err := client.Challenge.SetHTTP01Provider(provider); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DNSProviderWrapper is a multi-provider wrapper to support multiple
