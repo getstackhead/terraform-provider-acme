@@ -20,6 +20,7 @@ require (
 	github.com/terraform-providers/terraform-provider-tls v1.2.0
 	github.com/ulikunitz/xz v0.5.6 // indirect
 	github.com/vmihailenco/msgpack v4.0.4+incompatible // indirect
+	golang.org/x/sys v0.0.0-20200918174421-af09f7315aff // indirect
 	google.golang.org/genproto v0.0.0-20190508193815-b515fa19cec8 // indirect
 	software.sslmate.com/src/go-pkcs12 v0.0.0-20190209200317-47dd539968c4
 )
