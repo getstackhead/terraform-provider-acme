@@ -1,9 +1,9 @@
 package acme
 
 import (
-	"github.com/go-acme/lego/v3/acme"
-	"github.com/go-acme/lego/v3/registration"
-	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/go-acme/lego/v4/acme"
+	"github.com/go-acme/lego/v4/registration"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 // resourceACMERegistration returns the current version of the
@@ -30,6 +30,28 @@ func resourceACMERegistrationV1() *schema.Resource {
 				Required: true,
 				ForceNew: true,
 			},
+			"external_account_binding": {
+				Type:     schema.TypeList,
+				Optional: true,
+				MaxItems: 1,
+				ForceNew: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"key_id": {
+							Type:      schema.TypeString,
+							Required:  true,
+							Sensitive: true,
+							ForceNew:  true,
+						},
+						"hmac_base64": {
+							Type:      schema.TypeString,
+							Required:  true,
+							Sensitive: true,
+							ForceNew:  true,
+						},
+					},
+				},
+			},
 			"registration_url": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -45,12 +67,25 @@ func resourceACMERegistrationCreate(d *schema.ResourceData, meta interface{}) er
 		return err
 	}
 
-	reg, err := client.Registration.Register(registration.RegisterOptions{
-		TermsOfServiceAgreed: true,
-	})
+	var reg *registration.Resource
+	// If EAB was enabled, register using EAB.
+	if v, ok := d.GetOk("external_account_binding"); ok {
+		reg, err = client.Registration.RegisterWithExternalAccountBinding(registration.RegisterEABOptions{
+			TermsOfServiceAgreed: true,
+			Kid:                  v.([]interface{})[0].(map[string]interface{})["key_id"].(string),
+			HmacEncoded:          v.([]interface{})[0].(map[string]interface{})["hmac_base64"].(string),
+		})
+	} else {
+		// Normal registration.
+		reg, err = client.Registration.Register(registration.RegisterOptions{
+			TermsOfServiceAgreed: true,
+		})
+	}
+
 	if err != nil {
 		return err
 	}
+
 	d.SetId(reg.URI)
 
 	return resourceACMERegistrationRead(d, meta)

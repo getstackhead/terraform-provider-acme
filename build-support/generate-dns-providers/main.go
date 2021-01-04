@@ -4,7 +4,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -19,7 +18,7 @@ import (
 // envVarAliases are Terraform-specific environment variables for
 // specific providers.
 var envVarAliases = map[string]map[string]string{
-	"azure": map[string]string{
+	"azure": {
 		"ARM_CLIENT_ID":       "AZURE_CLIENT_ID",
 		"ARM_CLIENT_SECRET":   "AZURE_CLIENT_SECRET",
 		"ARM_SUBSCRIPTION_ID": "AZURE_SUBSCRIPTION_ID",
@@ -43,12 +42,6 @@ var dnsProviderGoTemplate = template.Must(
 	template.New("dns-provider-go-template").Parse(string(MustAsset("templates/dns-provider-go-template.tmpl"))),
 )
 
-// dnsProviderSidebarTemplate is the template for
-// dnsProviderSidebarTemplateText.
-var dnsProviderSidebarTemplate = template.Must(
-	template.New("dns-provider-sidebar-template").Parse(string(MustAsset("templates/acme-provider-sidebar-template.tmpl"))),
-)
-
 // dnsProviderDocTemplate is the template for DNS provider
 // documentation.
 var dnsProviderDocTemplate = template.Must(
@@ -56,7 +49,7 @@ var dnsProviderDocTemplate = template.Must(
 )
 
 // legoPkgPath is the root lego package path to use.
-const legoPkgPath = "github.com/go-acme/lego/v3"
+const legoPkgPath = "github.com/go-acme/lego/v4"
 
 // Type from "go help mod edit"
 type pkgInfoGoMod struct {
@@ -111,35 +104,6 @@ func execCommand(cmd string, args ...string) *exec.Cmd {
 	c := exec.Command(cmd, args...)
 	c.Stderr = os.Stderr
 	return c
-}
-
-// checkMkdir will make a directory if it doesn't exist. It fails if
-// it can't do it for whatever reason or if the path isn't a
-// directory.
-func checkMkdir(path string) error {
-	fi, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			err := os.MkdirAll(path, 0777)
-			if err != nil {
-				return err
-			}
-
-			// Get fileinfo again and fail 100% if still error
-			fi, err = os.Stat(path)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-
-	if !fi.Mode().IsDir() {
-		return fmt.Errorf("not a directory: %q", path)
-	}
-
-	return nil
 }
 
 // loadProviders loads all of the provider information from the
@@ -277,25 +241,6 @@ func generateGo(providers []dnsProviderInfo) {
 	}
 }
 
-// generateSidebar generates the sidebar.
-func generateSidebar(providers []dnsProviderInfo) {
-	b := new(bytes.Buffer)
-	if err := dnsProviderSidebarTemplate.Execute(b, providers); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := checkMkdir(os.Args[2]); err != nil {
-		log.Fatal(err)
-	}
-
-	path := filepath.Join(os.Args[2], "acme.erb")
-	if err := ioutil.WriteFile(path, b.Bytes(), 0666); err != nil {
-		log.Fatal(err)
-	}
-
-	log.Println("wrote sidebar data to:", path)
-}
-
 // generateProviderDocs generates each of the provider documentation
 // pages.
 func generateProviderDocs(providers []dnsProviderInfo) {
@@ -305,12 +250,7 @@ func generateProviderDocs(providers []dnsProviderInfo) {
 			log.Fatal(err)
 		}
 
-		dir := filepath.Join(os.Args[2], "docs", "dns_providers")
-		if err := checkMkdir(dir); err != nil {
-			log.Fatal(err)
-		}
-
-		path := filepath.Join(dir, provider.Code+".html.markdown")
+		path := filepath.Join(os.Args[2], "dns-providers-"+provider.Code+".md")
 		if err := ioutil.WriteFile(path, b.Bytes(), 0666); err != nil {
 			log.Fatal(err)
 		}
@@ -330,7 +270,6 @@ func main() {
 		generateGo(providers)
 
 	case "doc":
-		generateSidebar(providers)
 		generateProviderDocs(providers)
 
 	default:

@@ -1,40 +1,56 @@
 package acme
 
 import (
+	"go/build"
 	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/hashicorp/terraform/terraform"
-	"github.com/terraform-providers/terraform-provider-tls/tls"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
-var testAccProvider *schema.Provider
-var testAccProviders map[string]terraform.ResourceProvider
+var testAccProviders map[string]*schema.Provider
+
+// Path to the pebble CA cert list, from GOPATH
+const pebbleCACerts = "src/github.com/letsencrypt/pebble/test/certs/pebble.minica.pem"
+
+// Domain for certificates
+const pebbleCertDomain = "example.test"
+
+// URL for the non-EAB pebble directory
+const pebbleDirBasic = "https://localhost:14000/dir"
+
+// URL for the EAB pebble directory
+const pebbleDirEAB = "https://localhost:14001/dir"
+
+// Address for the challenge/test recursive nameserver
+const pebbleChallTestDNSSrv = "localhost:5553"
+
+// Relative path to the external challenge/test script
+const pebbleChallTestDNSScriptPath = "../build-support/scripts/pebble-challtest-dns.sh"
+
+// External providers (tls)
+var testAccExternalProviders = map[string]resource.ExternalProvider{
+	"tls": {
+		Source: "registry.terraform.io/hashicorp/tls",
+	},
+}
 
 func init() {
 	// Set TF_SCHEMA_PANIC_ON_ERROR as a sanity check on tests.
 	os.Setenv("TF_SCHEMA_PANIC_ON_ERROR", "true")
 
-	testAccProvider = Provider().(*schema.Provider)
-	testAccProviders = map[string]terraform.ResourceProvider{
-		"acme": testAccProvider,
-		"tls":  tls.Provider().(*schema.Provider),
+	// Set lego's CA certs to pebble's CA for testing w/pebble
+	os.Setenv("LEGO_CA_CERTIFICATES", filepath.Join(build.Default.GOPATH, pebbleCACerts))
+
+	testAccProviders = map[string]*schema.Provider{
+		"acme": Provider(),
 	}
 }
 
 func TestProvider(t *testing.T) {
-	if err := Provider().(*schema.Provider).InternalValidate(); err != nil {
+	if err := Provider().InternalValidate(); err != nil {
 		t.Fatalf("err: %s", err)
-	}
-}
-
-func TestProvider_impl(t *testing.T) {
-	var _ terraform.ResourceProvider = Provider()
-}
-
-func testAccPreCheck(t *testing.T) {
-	if v := os.Getenv("ACME_SERVER_URL"); v == "" {
-		t.Fatal("ACME_SERVER_URL must be set for acceptance tests")
 	}
 }

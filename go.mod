@@ -1,34 +1,30 @@
 module github.com/terraform-providers/terraform-provider-acme
 
+go 1.15
+
 require (
+	github.com/Azure/azure-sdk-for-go v45.0.0+incompatible // indirect
+	github.com/Azure/go-autorest/autorest v0.11.3 // indirect
+	github.com/Azure/go-autorest/autorest/azure/cli v0.4.0 // indirect
+	github.com/Azure/go-autorest/autorest/to v0.4.0 // indirect
+	github.com/Azure/go-autorest/autorest/validation v0.3.0 // indirect
 	github.com/BurntSushi/toml v0.3.1
+	github.com/aws/aws-sdk-go v1.31.9 // indirect
 	github.com/davecgh/go-spew v1.1.1
-	github.com/go-acme/lego/v3 v3.1.0
-	github.com/go-test/deep v1.0.2-0.20181118220953-042da051cf31 // indirect
-	github.com/grpc-ecosystem/grpc-gateway v1.9.5 // indirect
-	github.com/hashicorp/go-cleanhttp v0.5.1 // indirect
-	github.com/hashicorp/go-hclog v0.9.1 // indirect
+	github.com/go-acme/lego/v4 v4.1.3
+	github.com/gofrs/uuid v3.3.0+incompatible // indirect
+	github.com/google/go-cmp v0.5.2
+	github.com/gophercloud/gophercloud v0.10.1-0.20200424014253-c3bfe50899e5 // indirect
+	github.com/hashicorp/go-getter v1.5.1 // indirect
 	github.com/hashicorp/go-multierror v1.0.0
-	github.com/hashicorp/go-version v1.2.0 // indirect
-	github.com/hashicorp/hcl v1.0.0 // indirect
-	github.com/hashicorp/hil v0.0.0-20190212132231-97b3a9cdfa93 // indirect
-	github.com/hashicorp/terraform v0.12.6
-	github.com/hashicorp/yamux v0.0.0-20181012175058-2f1d1f20f75d // indirect
-	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/mattn/go-isatty v0.0.7 // indirect
-	github.com/miekg/dns v1.1.15
+	github.com/hashicorp/go-uuid v1.0.1
+	github.com/hashicorp/hcl/v2 v2.8.1 // indirect
+	github.com/hashicorp/terraform-plugin-sdk/v2 v2.4.0
+	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.0.0
-	github.com/mitchellh/reflectwalk v1.0.1 // indirect
-	github.com/spf13/afero v1.2.2 // indirect
-	github.com/terraform-providers/terraform-provider-tls v1.2.0
-	github.com/ulikunitz/xz v0.5.6 // indirect
-	github.com/vmihailenco/msgpack v4.0.4+incompatible // indirect
-	golang.org/x/net v0.0.0-20200904194848-62affa334b73 // indirect
-	golang.org/x/sys v0.0.0-20200918174421-af09f7315aff // indirect
-	google.golang.org/genproto v0.0.0-20190508193815-b515fa19cec8 // indirect
+	github.com/oklog/run v1.1.0 // indirect
+	github.com/zclconf/go-cty v1.7.1 // indirect
+	golang.org/x/tools v0.0.0-20201028111035-eafbe7b904eb // indirect
+	google.golang.org/api v0.34.0 // indirect
 	software.sslmate.com/src/go-pkcs12 v0.0.0-20190209200317-47dd539968c4
 )
-
-replace github.com/Azure/go-autorest => github.com/Azure/go-autorest v12.3.0+incompatible
-
-go 1.13

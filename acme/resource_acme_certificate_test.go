@@ -4,47 +4,34 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
-	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"log"
-	"os"
 	"reflect"
-	"strings"
+	"regexp"
 	"testing"
+	"time"
 
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"software.sslmate.com/src/go-pkcs12"
 )
 
-// Constants for OCSP must staple
-var (
-	tlsFeatureExtensionOID = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1, 24}
-	ocspMustStapleFeature  = []byte{0x30, 0x03, 0x02, 0x01, 0x05}
-	envKeys                = []string{
-		"AWS_PROFILE",
-		"AWS_ACCESS_KEY_ID",
-		"AWS_SECRET_ACCESS_KEY",
-		"AWS_SESSION_TOKEN",
-	}
-)
+var uuidRegexp = regexp.MustCompile(`^[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}$`)
+var certURLRegexp = regexp.MustCompile(`^https://localhost:1400[01]/certZ/[a-z0-9]+$`)
 
 func TestAccACMECertificate_basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t); testAccPreCheckCert(t) },
-		Providers: testAccProviders,
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccACMECertificateConfig(),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrPair(
-						"acme_certificate.certificate", "id",
-						"acme_certificate.certificate", "certificate_url",
-					),
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www", "www2", false),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "www", "www2"),
 				),
 			},
 		},
@@ -53,47 +40,15 @@ func TestAccACMECertificate_basic(t *testing.T) {
 
 func TestAccACMECertificate_CSR(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t); testAccPreCheckCert(t) },
-		Providers: testAccProviders,
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccACMECertificateCSRConfig(),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www3", "www4", false),
-				),
-			},
-		},
-	})
-}
-
-func TestAccACMECertificate_withDNSProviderConfig(t *testing.T) {
-	// Cache credentials first and then restore them after the function ends. We
-	// actually clear them after our pre-check so don't worry about that here.
-	envCache := make(map[string]string)
-	for _, k := range envKeys {
-		envCache[k] = os.Getenv(k)
-	}
-	defer func() {
-		for _, k := range envKeys {
-			os.Setenv(k, envCache[k])
-		}
-	}()
-
-	resource.Test(t, resource.TestCase{
-		PreCheck: func() {
-			testAccPreCheck(t)
-			testAccPreCheckCert(t)
-			testAccPreCheckCertZoneID(t)
-			for _, k := range envKeys {
-				os.Unsetenv(k)
-			}
-		},
-		Providers: testAccProviders,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccACMECertificateWithDNSProviderConfig(envCache),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www5", "", false),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "www3", "www4"),
 				),
 			},
 		},
@@ -101,23 +56,21 @@ func TestAccACMECertificate_withDNSProviderConfig(t *testing.T) {
 }
 
 func TestAccACMECertificate_forceRenewal(t *testing.T) {
-	var certID string
+	var certURL string
 	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t); testAccPreCheckCert(t) },
-		Providers: testAccProviders,
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccACMECertificateForceRenewalConfig(),
 				Check: resource.ComposeTestCheckFunc(
 					func(s *terraform.State) error {
-						certID = s.RootModule().Resources["acme_certificate.certificate"].Primary.ID
+						certURL = s.RootModule().Resources["acme_certificate.certificate"].Primary.Attributes["certificate_url"]
 						return nil
 					},
-					resource.TestCheckResourceAttrPair(
-						"acme_certificate.certificate", "id",
-						"acme_certificate.certificate", "certificate_url",
-					),
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www6", "", false),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "www6", ""),
 				),
 				ExpectNonEmptyPlan: true,
 			},
@@ -125,38 +78,17 @@ func TestAccACMECertificate_forceRenewal(t *testing.T) {
 				Config: testAccACMECertificateForceRenewalConfig(),
 				Check: resource.ComposeTestCheckFunc(
 					func(s *terraform.State) error {
-						if certID == s.Modules[0].Resources["acme_certificate.certificate"].Primary.ID {
-							return errors.New("certificate ID did not change")
+						if certURL == s.Modules[0].Resources["acme_certificate.certificate"].Primary.Attributes["certificate_url"] {
+							return errors.New("certificate URL did not change")
 						}
 
 						return nil
 					},
-					resource.TestCheckResourceAttrPair(
-						"acme_certificate.certificate", "id",
-						"acme_certificate.certificate", "certificate_url",
-					),
-					resource.TestCheckResourceAttrPair(
-						"acme_certificate.certificate", "id",
-						"acme_certificate.certificate", "certificate_url",
-					),
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www6", "", false),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "www6", ""),
 				),
 				ExpectNonEmptyPlan: true,
-			},
-		},
-	})
-}
-
-func TestAccACMECertificate_mustStaple(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t); testAccPreCheckCert(t) },
-		Providers: testAccProviders,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccACMECertificateMustStapleConfig(),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www8", "www9", true),
-				),
 			},
 		},
 	})
@@ -164,40 +96,15 @@ func TestAccACMECertificate_mustStaple(t *testing.T) {
 
 func TestAccACMECertificate_wildcard(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t); testAccPreCheckCert(t) },
-		Providers: testAccProviders,
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccACMECertificateWildcardConfig(),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "*", "", false),
-				),
-			},
-		},
-	})
-}
-
-func TestAccACMECertificate_recursiveNameservers(t *testing.T) {
-	f, err := newTestForwarder()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer f.Shutdown()
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t); testAccPreCheckCert(t) },
-		Providers: testAccProviders,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccACMECertificateRecursiveNameserversConfig(f.LocalAddr()),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrPair(
-						"acme_certificate.certificate", "id",
-						"acme_certificate.certificate", "certificate_url",
-					),
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www10", "www11", false),
-					f.Check(),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "*", ""),
 				),
 			},
 		},
@@ -206,57 +113,110 @@ func TestAccACMECertificate_recursiveNameservers(t *testing.T) {
 
 func TestAccACMECertificate_p12Password(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t); testAccPreCheckCert(t) },
-		Providers: testAccProviders,
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccACMECertificateConfigP12Password("changeit"),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrPair(
-						"acme_certificate.certificate", "id",
-						"acme_certificate.certificate", "certificate_url",
-					),
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www12", "www13", false),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "www12", "www13"),
 				),
 			},
 			{
 				Config: testAccACMECertificateConfigP12Password("changeitagain"),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrPair(
-						"acme_certificate.certificate", "id",
-						"acme_certificate.certificate", "certificate_url",
-					),
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www12", "www13", false),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "www12", "www13"),
 				),
 			},
 		},
 	})
 }
 
-func TestAccACMECertificate_multiProviders(t *testing.T) {
+func TestAccACMECertificate_preCheckDelay(t *testing.T) {
+	var step1Start, step1End, step2Start, step2End time.Time
+	const delay = 15
+
 	resource.Test(t, resource.TestCase{
-		PreCheck: func() {
-			testAccPreCheck(t)
-			testAccPreCheckCert(t)
-			testAccPreCheckCertMultiProviders(t)
-		},
-		Providers: testAccProviders,
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccACMECertificateConfigMultiProviders(),
+				PreConfig: func() { step1Start = time.Now() },
+				Config:    testAccACMECertificateConfigPreCheckDelay(0),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrPair(
-						"acme_certificate.certificate", "id",
-						"acme_certificate.certificate", "certificate_url",
-					),
-					testAccCheckACMECertificateValid("acme_certificate.certificate", "www14", "www15", false),
+					func(_ *terraform.State) error {
+						step1End = time.Now()
+						return nil
+					},
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "www16", "www17"),
+				),
+			},
+			{
+				Config:  testAccACMECertificateConfigPreCheckDelay(0),
+				Destroy: true,
+			},
+			{
+				PreConfig: func() { step2Start = time.Now() },
+				Config:    testAccACMECertificateConfigPreCheckDelay(delay),
+				Check: resource.ComposeTestCheckFunc(
+					func(_ *terraform.State) error {
+						step2End = time.Now()
+						step1Elapsed := step1End.Sub(step1Start)
+						step2Elapsed := step2End.Sub(step2Start)
+
+						// Approximate the actual delay and expect some margin of
+						// error, since it's pretty much guaranteed that the
+						// elapsed time is not going to be exact, to the tune of
+						// seconds on part of caching/etc.
+						//
+						// Additionally, we need to multiply the configured delay
+						// by the number of domains we're actually configuring
+						// challenges for.
+						const deltaThreshold = 5
+
+						expectedDelay := delay * 2
+						actualDelay := int((step2Elapsed - step1Elapsed) / time.Second)
+						delayDelta := expectedDelay - actualDelay
+						if delayDelta > deltaThreshold || delayDelta < -deltaThreshold {
+							return fmt.Errorf(
+								"delta too large between standard and pre-check delay applies; expected %ds, got approx. %ds", expectedDelay, actualDelay)
+						}
+
+						return nil
+					},
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "www16", "www17"),
 				),
 			},
 		},
 	})
 }
 
-func testAccCheckACMECertificateValid(n, cn, san string, mustStaple bool) resource.TestCheckFunc {
+func TestAccACMECertificate_duplicateDomain(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccACMECertificateConfigDuplicateDomain(),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "id", uuidRegexp),
+					resource.TestMatchResourceAttr("acme_certificate.certificate", "certificate_url", certURLRegexp),
+					testAccCheckACMECertificateValid("acme_certificate.certificate", "test-dupe", "test-dupe"),
+				),
+			},
+		},
+	})
+}
+
+func testAccCheckACMECertificateValid(n, cn, san string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[n]
 		if !ok {
@@ -322,10 +282,10 @@ func testAccCheckACMECertificateValid(n, cn, san string, mustStaple bool) resour
 		}
 
 		// domains
-		domain := "." + os.Getenv("ACME_CERT_DOMAIN")
+		domain := "." + pebbleCertDomain
 		expectedCN := cn + domain
 		var expectedSANs []string
-		if san != "" {
+		if san != "" && cn != san {
 			expectedSANs = []string{cn + domain, san + domain}
 		} else {
 			expectedSANs = []string{cn + domain}
@@ -341,17 +301,6 @@ func testAccCheckACMECertificateValid(n, cn, san string, mustStaple bool) resour
 		if reflect.DeepEqual(expectedSANs, actualSANs) != true {
 			return fmt.Errorf("Expected SANs to be %#v, got %#v", expectedSANs, actualSANs)
 		}
-
-		if mustStaple {
-			for _, v := range x509Cert.Extensions {
-				if reflect.DeepEqual(v.Id, tlsFeatureExtensionOID) && reflect.DeepEqual(v.Value, ocspMustStapleFeature) {
-					goto stapleOK
-				}
-			}
-			return fmt.Errorf("Did not find OCSP Stapling Required extension when expected")
-		}
-
-	stapleOK:
 
 		return nil
 	}
@@ -402,48 +351,14 @@ func testFindPEMInP12(pfxB64 []byte, password string, expected ...[]byte) error 
 	return nil
 }
 
-func testAccPreCheckCert(t *testing.T) {
-	if v := os.Getenv("ACME_EMAIL_ADDRESS"); v == "" {
-		t.Fatal("ACME_EMAIL_ADDRESS must be set for the certificate acceptance test")
-	}
-	if v := os.Getenv("ACME_CERT_DOMAIN"); v == "" {
-		t.Fatal("ACME_CERT_DOMAIN must be set for the certificate acceptance test")
-	}
-	if v := os.Getenv("AWS_PROFILE"); v == "" {
-		if v := os.Getenv("AWS_ACCESS_KEY_ID"); v == "" {
-			t.Fatal("AWS_ACCESS_KEY_ID must be set for the certificate acceptance test")
-		}
-		if v := os.Getenv("AWS_SECRET_ACCESS_KEY"); v == "" {
-			t.Fatal("AWS_SECRET_ACCESS_KEY must be set for the certificate acceptance test")
-		}
-	}
-	if v := os.Getenv("AWS_DEFAULT_REGION"); v == "" {
-		log.Println("[INFO] Test: Using us-west-2 as test region")
-		os.Setenv("AWS_DEFAULT_REGION", "us-west-2")
-	}
-}
-
-func testAccPreCheckCertZoneID(t *testing.T) {
-	if v := os.Getenv("ACME_R53_ZONE_ID"); v == "" {
-		t.Skip("ACME_R53_ZONE_ID must be set for the static configuration certificate acceptance test")
-	}
-}
-
-func testAccPreCheckCertMultiProviders(t *testing.T) {
-	if v := os.Getenv("ACME_MULTI_PROVIDERS"); v == "" {
-		t.Skip("ACME_MULTI_PROVIDERS must be set for the multiple providers certificate acceptance test")
-	} else {
-		providers := strings.Split(os.Getenv("ACME_MULTI_PROVIDERS"), ",")
-		if len(providers) != 2 {
-			t.Fatal("ACME_MULTI_PROVIDERS must specify exactly two providers")
-		}
-	}
-}
-
 func testAccACMECertificateConfig() string {
 	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
 variable "email_address" {
-  default = "%s"
+  default = "nobody@%s"
 }
 
 variable "domain" {
@@ -464,17 +379,32 @@ resource "acme_certificate" "certificate" {
   common_name               = "www.${var.domain}"
   subject_alternative_names = ["www2.${var.domain}"]
 
+  recursive_nameservers        = ["%s"]
+  disable_complete_propagation = true
+
   dns_challenge {
-    provider = "route53"
+    provider = "exec"
+    config = {
+      EXEC_PATH = "%s"
+    }
   }
 }
-`, os.Getenv("ACME_EMAIL_ADDRESS"), os.Getenv("ACME_CERT_DOMAIN"))
+`, pebbleDirBasic,
+		pebbleCertDomain,
+		pebbleCertDomain,
+		pebbleChallTestDNSSrv,
+		pebbleChallTestDNSScriptPath,
+	)
 }
 
 func testAccACMECertificateCSRConfig() string {
 	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
 variable "email_address" {
-  default = "%s"
+  default = "nobody@%s"
 }
 
 variable "domain" {
@@ -508,63 +438,32 @@ resource "acme_certificate" "certificate" {
   account_key_pem         = "${acme_registration.reg.account_key_pem}"
   certificate_request_pem = "${tls_cert_request.req.cert_request_pem}"
 
-  dns_challenge {
-    provider = "route53"
-  }
-}
-`, os.Getenv("ACME_EMAIL_ADDRESS"), os.Getenv("ACME_CERT_DOMAIN"))
-}
-
-func testAccACMECertificateWithDNSProviderConfig(params map[string]string) string {
-	return fmt.Sprintf(`
-variable "email_address" {
-  default = "%s"
-}
-
-variable "domain" {
-  default = "%s"
-}
-
-resource "tls_private_key" "private_key" {
-  algorithm = "RSA"
-}
-
-resource "acme_registration" "reg" {
-  account_key_pem = "${tls_private_key.private_key.private_key_pem}"
-  email_address   = "${var.email_address}"
-}
-
-resource "acme_certificate" "certificate" {
-  account_key_pem = "${acme_registration.reg.account_key_pem}"
-  common_name     = "www5.${var.domain}"
+  recursive_nameservers        = ["%s"]
+  disable_complete_propagation = true
 
   dns_challenge {
-    provider = "route53"
-
+    provider = "exec"
     config = {
-      AWS_PROFILE           = "%s"
-      AWS_ACCESS_KEY_ID     = "%s"
-      AWS_SECRET_ACCESS_KEY = "%s"
-      AWS_SESSION_TOKEN     = "%s"
-      AWS_HOSTED_ZONE_ID    = "%s"
+      EXEC_PATH = "%s"
     }
   }
 }
-`,
-		os.Getenv("ACME_EMAIL_ADDRESS"),
-		os.Getenv("ACME_CERT_DOMAIN"),
-		params["AWS_PROFILE"],
-		params["AWS_ACCESS_KEY_ID"],
-		params["AWS_SECRET_ACCESS_KEY"],
-		params["AWS_SESSION_TOKEN"],
-		os.Getenv("ACME_R53_ZONE_ID"),
+`, pebbleDirBasic,
+		pebbleCertDomain,
+		pebbleCertDomain,
+		pebbleChallTestDNSSrv,
+		pebbleChallTestDNSScriptPath,
 	)
 }
 
 func testAccACMECertificateForceRenewalConfig() string {
 	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
 variable "email_address" {
-  default = "%s"
+  default = "nobody@%s"
 }
 
 variable "domain" {
@@ -583,51 +482,34 @@ resource "acme_registration" "reg" {
 resource "acme_certificate" "certificate" {
   account_key_pem    = "${acme_registration.reg.account_key_pem}"
   common_name        = "www6.${var.domain}"
-  min_days_remaining = 720
+  min_days_remaining = 18250
+
+  recursive_nameservers        = ["%s"]
+  disable_complete_propagation = true
 
   dns_challenge {
-    provider = "route53"
+    provider = "exec"
+    config = {
+      EXEC_PATH = "%s"
+    }
   }
 }
-`, os.Getenv("ACME_EMAIL_ADDRESS"), os.Getenv("ACME_CERT_DOMAIN"))
-}
-
-func testAccACMECertificateMustStapleConfig() string {
-	return fmt.Sprintf(`
-variable "email_address" {
-  default = "%s"
-}
-
-variable "domain" {
-  default = "%s"
-}
-
-resource "tls_private_key" "private_key" {
-  algorithm = "RSA"
-}
-
-resource "acme_registration" "reg" {
-  account_key_pem = "${tls_private_key.private_key.private_key_pem}"
-  email_address   = "${var.email_address}"
-}
-
-resource "acme_certificate" "certificate" {
-  account_key_pem           = "${acme_registration.reg.account_key_pem}"
-  common_name               = "www8.${var.domain}"
-  subject_alternative_names = ["www9.${var.domain}"]
-  must_staple               = true
-
-  dns_challenge {
-    provider = "route53"
-  }
-}
-`, os.Getenv("ACME_EMAIL_ADDRESS"), os.Getenv("ACME_CERT_DOMAIN"))
+`, pebbleDirBasic,
+		pebbleCertDomain,
+		pebbleCertDomain,
+		pebbleChallTestDNSSrv,
+		pebbleChallTestDNSScriptPath,
+	)
 }
 
 func testAccACMECertificateWildcardConfig() string {
 	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
 variable "email_address" {
-  default = "%s"
+  default = "nobody@%s"
 }
 
 variable "domain" {
@@ -647,50 +529,32 @@ resource "acme_certificate" "certificate" {
   account_key_pem = "${acme_registration.reg.account_key_pem}"
   common_name     = "*.${var.domain}"
 
-  dns_challenge {
-    provider = "route53"
-  }
-}
-`, os.Getenv("ACME_EMAIL_ADDRESS"), os.Getenv("ACME_CERT_DOMAIN"))
-}
-
-func testAccACMECertificateRecursiveNameserversConfig(nameserver string) string {
-	return fmt.Sprintf(`
-variable "email_address" {
-  default = "%s"
-}
-
-variable "domain" {
-  default = "%s"
-}
-
-resource "tls_private_key" "private_key" {
-  algorithm = "RSA"
-}
-
-resource "acme_registration" "reg" {
-  account_key_pem = "${tls_private_key.private_key.private_key_pem}"
-  email_address   = "${var.email_address}"
-}
-
-resource "acme_certificate" "certificate" {
-  account_key_pem           = "${acme_registration.reg.account_key_pem}"
-  common_name               = "www10.${var.domain}"
-  subject_alternative_names = ["www11.${var.domain}"]
+  recursive_nameservers        = ["%s"]
+  disable_complete_propagation = true
 
   dns_challenge {
-    provider = "route53"
+    provider = "exec"
+    config = {
+      EXEC_PATH = "%s"
+    }
   }
-
-  recursive_nameservers = ["%s"]
 }
-`, os.Getenv("ACME_EMAIL_ADDRESS"), os.Getenv("ACME_CERT_DOMAIN"), nameserver)
+`, pebbleDirBasic,
+		pebbleCertDomain,
+		pebbleCertDomain,
+		pebbleChallTestDNSSrv,
+		pebbleChallTestDNSScriptPath,
+	)
 }
 
 func testAccACMECertificateConfigP12Password(password string) string {
 	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
 variable "email_address" {
-  default = "%s"
+  default = "nobody@%s"
 }
 
 variable "domain" {
@@ -716,30 +580,33 @@ resource "acme_certificate" "certificate" {
   subject_alternative_names = ["www13.${var.domain}"]
   certificate_p12_password  = "${var.password}"
 
+  recursive_nameservers        = ["%s"]
+  disable_complete_propagation = true
+
   dns_challenge {
-    provider = "route53"
+    provider = "exec"
+    config = {
+      EXEC_PATH = "%s"
+    }
   }
 }
-`,
-		os.Getenv("ACME_EMAIL_ADDRESS"),
-		os.Getenv("ACME_CERT_DOMAIN"),
+`, pebbleDirBasic,
+		pebbleCertDomain,
+		pebbleCertDomain,
 		password,
+		pebbleChallTestDNSSrv,
+		pebbleChallTestDNSScriptPath,
 	)
 }
 
-func testAccACMECertificateConfigMultiProviders() string {
-	providers := strings.Split(os.Getenv("ACME_MULTI_PROVIDERS"), ",")
-	if len(providers) < 2 {
-		// This is a workaround just to make sure we don't get a panic
-		// when the config is generated for the TestCase literal. This
-		// test should be skipped or error out if ACME_MULTI_PROVIDERS is
-		// not properly defiend.
-		providers = make([]string, 2)
-	}
-
+func testAccACMECertificateConfigPreCheckDelay(delay int) string {
 	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
 variable "email_address" {
-  default = "%s"
+  default = "nobody@%s"
 }
 
 variable "domain" {
@@ -757,16 +624,71 @@ resource "acme_registration" "reg" {
 
 resource "acme_certificate" "certificate" {
   account_key_pem           = "${acme_registration.reg.account_key_pem}"
-  common_name               = "www14.${var.domain}"
-  subject_alternative_names = ["www15.${var.domain}"]
+  common_name               = "www16.${var.domain}"
+  subject_alternative_names = ["www17.${var.domain}"]
+
+  recursive_nameservers        = ["%s"]
+  disable_complete_propagation = true
+  pre_check_delay              = %d
 
   dns_challenge {
-    provider = "%s"
-  }
-
-  dns_challenge {
-    provider = "%s"
+    provider = "exec"
+    config = {
+      EXEC_PATH = "%s"
+    }
   }
 }
-`, os.Getenv("ACME_EMAIL_ADDRESS"), os.Getenv("ACME_CERT_DOMAIN"), providers[0], providers[1])
+`, pebbleDirBasic,
+		pebbleCertDomain,
+		pebbleCertDomain,
+		pebbleChallTestDNSSrv,
+		delay,
+		pebbleChallTestDNSScriptPath,
+	)
+}
+
+func testAccACMECertificateConfigDuplicateDomain() string {
+	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
+variable "email_address" {
+  default = "nobody@%s"
+}
+
+variable "domain" {
+  default = "%s"
+}
+
+resource "tls_private_key" "private_key" {
+  algorithm = "RSA"
+}
+
+resource "acme_registration" "reg" {
+  account_key_pem = "${tls_private_key.private_key.private_key_pem}"
+  email_address   = "${var.email_address}"
+}
+
+resource "acme_certificate" "certificate" {
+  account_key_pem           = "${acme_registration.reg.account_key_pem}"
+  common_name               = "test-dupe.${var.domain}"
+  subject_alternative_names = ["test-dupe.${var.domain}"]
+
+  recursive_nameservers        = ["%s"]
+  disable_complete_propagation = true
+
+  dns_challenge {
+    provider = "exec"
+    config = {
+      EXEC_PATH = "%s"
+    }
+  }
+}
+`, pebbleDirBasic,
+		pebbleCertDomain,
+		pebbleCertDomain,
+		pebbleChallTestDNSSrv,
+		pebbleChallTestDNSScriptPath,
+	)
 }

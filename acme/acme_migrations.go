@@ -1,9 +1,46 @@
 package acme
 
 import (
-	"github.com/hashicorp/terraform/helper/schema"
+	"context"
+	"fmt"
+
+	"github.com/hashicorp/go-uuid"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/mitchellh/copystructure"
 )
+
+// resourceACMECertificateStateUpgraderV4 returns the state upgrader
+// that handles migrations from version 4 to version 5 for
+// acme_certificate.
+func resourceACMECertificateStateUpgraderV4() schema.StateUpgrader {
+	return schema.StateUpgrader{
+		Version: 4,
+		Type:    resourceACMECertificateV4().CoreConfigSchema().ImpliedType(),
+		Upgrade: resourceACMECertificateStateUpgraderV4Func,
+	}
+}
+
+// resourceACMECertificateStateUpgraderV4Func provides Terraform 0.12
+// state upgrade functionality from schema version 4 to schema
+// version 5 for acme_certificate.
+func resourceACMECertificateStateUpgraderV4Func(
+	_ context.Context,
+	rawState map[string]interface{},
+	meta interface{},
+) (map[string]interface{}, error) {
+	resourceUUID, err := uuid.GenerateUUID()
+	if err != nil {
+		return nil, fmt.Errorf("error generating new UUID for resource: %s", err)
+	}
+
+	z, err := copystructure.Copy(rawState)
+	if err != nil {
+		return nil, err
+	}
+	result := z.(map[string]interface{})
+	result["id"] = resourceUUID
+	return result, nil
+}
 
 // resourceACMECertificateStateUpgraderV3 returns the state upgrader
 // that handles migrations from version 3 to version 4 for
@@ -20,6 +57,7 @@ func resourceACMECertificateStateUpgraderV3() schema.StateUpgrader {
 // state upgrade functionality from schema version 3 to schema
 // version 4 for acme_certificate.
 func resourceACMECertificateStateUpgraderV3Func(
+	_ context.Context,
 	rawState map[string]interface{},
 	meta interface{},
 ) (map[string]interface{}, error) {

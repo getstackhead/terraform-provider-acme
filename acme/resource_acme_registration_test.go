@@ -2,19 +2,18 @@ package acme
 
 import (
 	"fmt"
-	"os"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccACMERegistration_basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckReg(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckACMERegistrationValid("acme_registration.reg", false),
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
+		CheckDestroy:      testAccCheckACMERegistrationValid("acme_registration.reg", false),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccACMERegistrationConfig(),
@@ -30,11 +29,31 @@ func TestAccACMERegistration_basic(t *testing.T) {
 	})
 }
 
+func TestAccACMERegistration_eab(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
+		CheckDestroy:      testAccCheckACMERegistrationValid("acme_registration.reg", false),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccACMERegistrationConfigEAB(),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrPair(
+						"acme_registration.reg", "id",
+						"acme_registration.reg", "registration_url",
+					),
+					testAccCheckACMERegistrationValid("acme_registration.reg", true),
+				),
+			},
+		},
+	})
+}
+
 func TestAccACMERegistration_refreshDeactivated(t *testing.T) {
 	var state *terraform.State
 	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t); testAccPreCheckReg(t) },
-		Providers: testAccProviders,
+		Providers:         testAccProviders,
+		ExternalProviders: testAccExternalProviders,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccACMERegistrationConfig(),
@@ -54,7 +73,7 @@ func TestAccACMERegistration_refreshDeactivated(t *testing.T) {
 				PreConfig: func() {
 					rs := state.RootModule().Resources["acme_registration.reg"]
 					d := testAccCheckACMERegistrationResourceData(rs)
-					client, _, err := expandACMEClient(d, testAccProvider.Meta(), true)
+					client, _, err := expandACMEClient(d, testAccProviders["acme"].Meta(), true)
 					if err != nil {
 						panic(err)
 					}
@@ -75,6 +94,33 @@ func testAccCheckACMERegistrationValid(n string, exists bool) resource.TestCheck
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[n]
 		if !ok {
+			if !exists {
+				// No state, but this is okay. The new TF SDK completely
+				// removes state for deleted resources before the destroy
+				// check runs, so we cannot do in-band verification of
+				// resource deletion. Normal patterns loop through state
+				// looking for resources, using a pattern like this:
+				//
+				// for _, rs := range s.RootModule().Resources {
+				//   if rs.Type != "example_widget" {
+				//     continue
+				//   }
+				//
+				//   ...
+				// }
+				//
+				// This pattern will completely miss the fact that the
+				// resource state doesn't exist at all, and return no error.
+				//
+				// TODO: Maybe put in a bug report for this and see if the
+				// SDK can be adjusted to allow for the passing in of
+				// pre-destroy state to see if we can assert the deletion of
+				// the resource from infrastructure, and not just TF state.
+				//
+				// Return nil to pass the test.
+				return nil
+			}
+
 			return fmt.Errorf("Can't find ACME registration: %s", n)
 		}
 
@@ -84,7 +130,7 @@ func testAccCheckACMERegistrationValid(n string, exists bool) resource.TestCheck
 
 		d := testAccCheckACMERegistrationResourceData(rs)
 
-		client, _, err := expandACMEClient(d, testAccProvider.Meta(), true)
+		client, _, err := expandACMEClient(d, testAccProviders["acme"].Meta(), true)
 		if err != nil {
 			if regGone(err) && !exists {
 				return nil
@@ -120,21 +166,40 @@ func testAccCheckACMERegistrationResourceData(rs *terraform.ResourceState) *sche
 	return d
 }
 
-func testAccPreCheckReg(t *testing.T) {
-	if v := os.Getenv("ACME_EMAIL_ADDRESS"); v == "" {
-		t.Fatal("ACME_EMAIL_ADDRESS must be set for the registration acceptance test")
-	}
-}
-
 func testAccACMERegistrationConfig() string {
 	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
 resource "tls_private_key" "private_key" {
-    algorithm = "RSA"
+  algorithm = "RSA"
 }
 
 resource "acme_registration" "reg" {
   account_key_pem = "${tls_private_key.private_key.private_key_pem}"
-  email_address   = "%s"
+  email_address   = "nobody@example.test"
 }
-`, os.Getenv("ACME_EMAIL_ADDRESS"))
+`, pebbleDirBasic)
+}
+
+func testAccACMERegistrationConfigEAB() string {
+	return fmt.Sprintf(`
+provider "acme" {
+  server_url = "%s"
+}
+
+resource "tls_private_key" "private_key" {
+  algorithm = "RSA"
+}
+
+resource "acme_registration" "reg" {
+  account_key_pem = "${tls_private_key.private_key.private_key_pem}"
+  email_address   = "nobody@example.test"
+  external_account_binding {
+    key_id      = "kid-1"
+    hmac_base64 = "zWNDZM6eQGHWpSRTPal5eIUYFTu7EajVIoguysqZ9wG44nMEtx3MUAsUDkMTQ12W"
+  }
+}
+`, pebbleDirEAB)
 }

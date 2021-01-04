@@ -1,4 +1,72 @@
-## 1.5.1 (Unreleased)
+## 2.0.1-pre
+
+Bumped version for dev.
+
+## 2.0.0 (December 23, 2020)
+
+BREAKING CHANGES:
+
+* `resource/acme_certificate:` The resource ID is now a state-local UUID, not
+  the same as `certificate_url`. This is to prevent drift issues during renewal.
+  If you need the URL for the current version of the certificate, use the
+  `certificate_url` field.
+  [#103](https://github.com/vancluever/terraform-provider-acme/issues/103)
+
+FEATURES:
+
+* `resource/acme_certificate:` Added the `pre_check_delay` option to allow for
+  the insertion of delays in DNS challenges. This should help with DNS
+  propagation issues with certain providers.
+  [#111](https://github.com/vancluever/terraform-provider-acme/pull/111)
+* `resource/acme_certificate:` The domain defined in the `common_name` field can
+  now be specified in `subject_alternative_names`. This is a strictly semantic
+  change as the CN is already included in the SAN list of issued certificates.
+  [#90](https://github.com/vancluever/terraform-provider-acme/issues/90)
+
+## 1.6.3 (November 30, 2020)
+
+This is (yet another) simple version bump to attempt to fix documentation on the
+Terraform Registry. No changes are being made.
+
+## 1.6.2 (November 30, 2020)
+
+This is (another) simple version bump to attempt to fix documentation on the
+Terraform Registry. No changes are being made.
+
+## 1.6.1 (November 27, 2020)
+
+This is a simple version bump to attempt to fix documentation on the Terraform
+Registry. No changes are being made.
+
+## 1.6.0 (November 27, 2020)
+
+LEGO UPDATE:
+
+[lego](https://github.com/go-acme/lego) has been updated to v4.1.3 See the lego
+[CHANGELOG.md](https://github.com/go-acme/lego/blob/v4.1.3/CHANGELOG.md) for
+more details on additions and changes to DNS providers, and other minor changes
+to the library.
+
+GENERAL NOTIFICATIONS:
+
+* Testing of the provider has moved to use
+  [pebble](https://github.com/letsencrypt/pebble/) exclusively. Tests for some
+  features that are not explicitly supported by pebble or were otherwise tested
+  manually have been removed. See
+  [`907de66`](https://github.com/vancluever/terraform-provider-acme/commit/907de66625886fbd86b383cb158515ef458f3604)
+  for more details.
+* Support for Terraform 0.11 has been dropped. The provider is now only
+  available on the Terraform registry.
+
+FEATURES:
+
+* `resource/acme_registration:` Added support for external account binding. This
+  allows registrations to be linked to external accounts, commonly used by
+  commercial CAs.
+* `resource/acme_certificate:` Added the `disable_complete_propagation` option,
+  which allows one to disable the propagation pre-check before attempting to
+  complete the DNS challenge. Enabling this is only recommended for testing.
+
 ## 1.5.0 (October 21, 2019)
 
 LEGO UPDATE:
